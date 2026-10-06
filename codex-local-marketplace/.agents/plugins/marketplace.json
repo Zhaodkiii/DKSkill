@@ -1,0 +1,20 @@
+{
+  "name": "hua-local",
+  "interface": {
+    "displayName": "Hua 本地插件"
+  },
+  "plugins": [
+    {
+      "name": "jijian-biancheng",
+      "source": {
+        "source": "local",
+        "path": "./plugins/jijian-biancheng"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Engineering"
+    }
+  ]
+}

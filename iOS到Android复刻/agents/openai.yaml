@@ -1,0 +1,6 @@
+interface:
+  display_name: "Replicate iOS to Android"
+  short_description: "Port iOS apps into Android clients"
+  default_prompt: "Use $replicate-ios-to-android to analyze the server and iOS client, then build an Android client with matching behavior."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,32 @@
+{
+  "name": "jijian-biancheng",
+  "version": "4.10.0",
+  "description": "Lazy senior dev mode. Forces the simplest, shortest solution that actually works: YAGNI, stdlib first, no unrequested abstractions.",
+  "author": {
+    "name": "Dietrich Gebert",
+    "url": "https://github.com/DietrichGebert"
+  },
+  "homepage": "https://github.com/DietrichGebert/ponytail",
+  "repository": "https://github.com/DietrichGebert/ponytail",
+  "license": "MIT",
+  "keywords": ["yagni", "minimalism", "code-review", "productivity"],
+  "skills": "./skills/",
+  "hooks": "./hooks/claude-codex-hooks.json",
+  "interface": {
+    "displayName": "极简编程助手",
+    "shortDescription": "让 AI 编程少写、少绕、少过度设计",
+    "longDescription": "优先复用现有代码、标准库和平台原生能力，用最小的正确实现完成任务。",
+    "developerName": "Dietrich Gebert",
+    "category": "Productivity",
+    "capabilities": ["Instructions", "Lifecycle hooks"],
+    "websiteURL": "https://github.com/DietrichGebert/ponytail",
+    "defaultPrompt": [
+      "Use Ponytail mode for this task.",
+      "Review this diff for over-engineering.",
+      "Find the smallest correct implementation."
+    ],
+    "brandColor": "#111111",
+    "composerIcon": "./assets/logo.png",
+    "logo": "./assets/logo.png"
+  }
+}

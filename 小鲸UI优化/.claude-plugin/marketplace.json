@@ -1,0 +1,20 @@
+{
+  "name": "小鲸UI优化",
+  "description": "小鲸 UI 优化技能库：用于 Claude Code / Codex 的前端设计优化、图片转代码和高级视觉风格技能",
+  "owner": {
+    "name": "leonxlnx",
+    "email": ""
+  },
+  "plugins": [
+    {
+      "name": "小鲸UI优化",
+      "description": "小鲸 UI 优化技能包：包含高级前端视觉优化、重设计、极简/工业风格、图片转代码、移动端与网页视觉生成等技能",
+      "version": "1.0.0",
+      "source": "./",
+      "author": {
+        "name": "leonxlnx",
+        "email": ""
+      }
+    }
+  ]
+}
