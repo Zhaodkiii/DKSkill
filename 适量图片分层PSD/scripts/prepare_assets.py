@@ -7,6 +7,19 @@ import numpy as np
 from PIL import Image
 
 
+def validate_logos(layers):
+    logos = [item for item in layers if item.get("role") == "brand_logo"]
+    if not logos:
+        raise ValueError("每份成品必须有独立主题 Logo 层：role=brand_logo")
+    for item in logos:
+        if not item.get("name", "").startswith("品牌Logo_"):
+            raise ValueError("Logo 图层名称必须以 品牌Logo_ 开头")
+        if item.get("transparent", True) is not True or not item.get("box"):
+            raise ValueError("Logo 必须是带目标位置 box 的透明素材")
+        if item.get("visible", True) is not True or float(item.get("opacity", 100)) <= 0:
+            raise ValueError("Logo 必须可见，不能用隐藏层或零透明度充数")
+
+
 def validate_text(item):
     if not item["name"].startswith("文字图像_"):
         return
@@ -80,6 +93,15 @@ def main():
         else:
             raise AssertionError("宽高比失配未被拒绝")
         validate_text({"name": "文字图像_标题_山坳里的两村", "semantic_text": "山坳里的两村", "editable": False})
+        logo = {"name": "品牌Logo_池水倒影", "role": "brand_logo", "box": {"x": 0, "y": 0, "width": 50, "height": 30}}
+        validate_logos([logo])
+        for invalid in ([], [dict(logo, visible=False)], [dict(logo, opacity=0)], [dict(logo, transparent=False)]):
+            try:
+                validate_logos(invalid)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("缺失或不可见的 Logo 未被拒绝")
         print("ok")
         return
 
@@ -89,6 +111,7 @@ def main():
     job = json.loads(Path(args.job).read_text(encoding="utf-8"))
     if job.get("texts"):
         raise ValueError("不允许 texts/Type Layer；文字必须是透明图像组件")
+    validate_logos(job["layers"])
 
     canvas = job["canvas"]
     canvas_width = int(canvas["width"])
@@ -101,12 +124,16 @@ def main():
         validate_text(item)
         source = Image.open(item["path"])
         transparent = bool(item.get("transparent", True))
+        if item.get("role") == "brand_logo" and (source.format != "PNG" or "A" not in source.getbands()):
+            raise ValueError(f"Logo 必须是含 Alpha 通道的 PNG: {item['name']}")
 
         if transparent:
             image = source.convert("RGBA")
             alpha = np.asarray(image.getchannel("A"))
             if not np.any(alpha < 255):
                 raise ValueError(f"组件没有透明背景，必须重新生成: {item['name']}")
+            if item.get("role") == "brand_logo" and not np.any(alpha == 0):
+                raise ValueError(f"Logo 缺少全透明区域: {item['name']}")
             image = trim_alpha(image, int(item.get("alpha_threshold", 4)))
             box = item.get("box")
             if not box:
@@ -148,6 +175,8 @@ def main():
             layer["semantic_text"] = item["semantic_text"]
         if "editable" in item:
             layer["editable"] = bool(item["editable"])
+        if item.get("role") == "brand_logo":
+            layer["role"] = "brand_logo"
         layers.append(layer)
 
     manifest = {

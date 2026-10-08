@@ -1,0 +1,4 @@
+interface:
+  display_name: "旅行主题Logo生成"
+  short_description: "读图确认主题，在基础书本 Logo 上融入主题，验收透明背景并存档"
+  default_prompt: "使用 $寻寻仔主题Logo生成，每次请求只调用一次生成工具、只生成一张 Logo，不批量生成或自动修正重试；调用前都重新读取并实际查看原文件 /Users/hua/Documents/project/TravelDiary/Logo/exec-fd7f47de-2f66-48cd-a4f5-7266e5c63169.png，将它作为第一张生成参考，同时查看我提供的主题图片，保留书本、双眼、虚线路线与红点，在这个基础上融入主题，生成一张不含品牌字标或其他文字的独立透明背景主题 Logo，验收后按中文主题名称只保存 PNG 到 TravelDiary/Logo，不生成 .md 或其他附带文档。"

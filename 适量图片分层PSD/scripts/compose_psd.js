@@ -8,6 +8,11 @@ const manifestPath = process.argv[2];
 if (!manifestPath) throw new Error('usage: compose_psd.js /absolute/path/manifest.json');
 const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 if (m.texts && m.texts.length) throw new Error('Type Layer is disabled; put all text images in layers');
+const logos = m.layers.filter(layer => layer.role === 'brand_logo');
+if (!logos.length) throw new Error('每份成品必须有独立主题 Logo 层：role=brand_logo');
+if (logos.some(layer => !layer.name.startsWith('品牌Logo_') || layer.visible === false || Number(layer.opacity ?? 100) <= 0)) {
+  throw new Error('Logo 图层必须以 品牌Logo_ 命名且可见');
+}
 if (fs.existsSync(m.output) && !m.overwrite) throw new Error(`output already exists; use a new versioned path or set overwrite=true: ${m.output}`);
 
 function jsxString(value) {
@@ -38,6 +43,11 @@ for (let i = 0; i < m.layers.length; i++) {
   jsx.push(`var b${i} = placed${i}.bounds; placed${i}.translate(${layer.x} - b${i}[0].as('px'), ${layer.y} - b${i}[1].as('px'));`);
 }
 jsx.push('placeholder.remove();');
+for (let i = 0; i < m.layers.length; i++) {
+  if (m.layers[i].role === 'brand_logo') {
+    jsx.push(`placed${i}.visible = true; placed${i}.opacity = 100; placed${i}.move(doc, ElementPlacement.PLACEATBEGINNING);`);
+  }
+}
 
 jsx.push(`var output = new File(${jsxString(m.output)});`);
 jsx.push('var saveOptions = new PhotoshopSaveOptions(); saveOptions.layers = true; saveOptions.embedColorProfile = true;');
@@ -50,6 +60,9 @@ jsx.push("if (textCount != 0) throw new Error('unexpected Type Layer');");
 for (let i = 0; i < m.layers.length; i++) {
   jsx.push(`var found${i} = 0; for (var j = 0; j < check.layers.length; j++) if (check.layers[j].name == ${jsxString(m.layers[i].name)}) found${i}++;`);
   jsx.push(`if (found${i} != 1) throw new Error('missing or duplicate layer: ' + ${jsxString(m.layers[i].name)});`);
+  if (m.layers[i].role === 'brand_logo') {
+    jsx.push(`var logo${i} = check.artLayers.getByName(${jsxString(m.layers[i].name)}); if (!logo${i}.visible || logo${i}.opacity <= 0) throw new Error('Logo is hidden');`);
+  }
 }
 if (m.preview) {
   jsx.push(`var preview = new File(${jsxString(m.preview)}); var png = new PNGSaveOptions(); check.saveAs(preview, png, true, Extension.LOWERCASE);`);
@@ -64,7 +77,7 @@ const appleScript = `set jsxFile to POSIX file "${jsxPath}" as alias\nset jsxCod
 try {
   cp.execFileSync('osascript', ['-e', appleScript], {stdio: 'inherit'});
   if (!fs.existsSync(m.output)) throw new Error('Photoshop did not create the PSD');
-  console.log(JSON.stringify({output: m.output, width: m.canvas.width, height: m.canvas.height, layers: m.layers.length, textLayers: 0}));
+  console.log(JSON.stringify({output: m.output, width: m.canvas.width, height: m.canvas.height, layers: m.layers.length, textLayers: 0, logoLayers: logos.length}));
 } finally {
   fs.rmSync(work, {recursive: true, force: true});
 }

@@ -8,6 +8,19 @@ import numpy as np
 from PIL import Image, ImageOps
 
 
+def validate_logos(layers):
+    logos = [item for item in layers if item.get("role") == "brand_logo"]
+    if not logos:
+        raise ValueError("每份成品必须有独立主题 Logo 层：role=brand_logo")
+    for item in logos:
+        if not item.get("name", "").startswith("品牌Logo_"):
+            raise ValueError("Logo 图层名称必须以 品牌Logo_ 开头")
+        if item.get("transparent", True) is not True or not item.get("box"):
+            raise ValueError("Logo 必须是带目标位置 box 的透明素材")
+        if item.get("visible", True) is not True or float(item.get("opacity", 100)) <= 0:
+            raise ValueError("Logo 必须可见，不能用隐藏层或零透明度充数")
+
+
 def connected_white_to_alpha(image: Image.Image, threshold: int) -> Image.Image:
     rgb = np.asarray(image.convert("RGB"))
     white = np.all(rgb >= threshold, axis=2).astype(np.uint8)
@@ -66,14 +79,42 @@ def fit_generated_layer(image, box):
     return result
 
 
+def prepare_logo(image, item, canvas_size):
+    if image.format != "PNG" or "A" not in image.getbands():
+        raise ValueError("Logo 必须是含 Alpha 通道的 PNG")
+    alpha = np.asarray(image.getchannel("A"))
+    if not np.any(alpha == 0):
+        raise ValueError("Logo 缺少全透明区域")
+    ys, xs = np.where(alpha > 4)
+    if not len(xs):
+        raise ValueError("Logo 没有可见像素")
+    image = image.crop((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+    box = item["box"]
+    x, y = float(box["x"]), float(box["y"])
+    width, height = int(box["width"]), int(box["height"])
+    if width <= 0 or height <= 0 or x < 0 or y < 0 or x + width > canvas_size[0] or y + height > canvas_size[1]:
+        raise ValueError("Logo 目标 box 越界或尺寸无效")
+    source_ratio, target_ratio = image.width / image.height, width / height
+    mismatch = max(source_ratio / target_ratio, target_ratio / source_ratio) - 1
+    if mismatch > float(item.get("ratio_tolerance", 0.15)):
+        raise ValueError("Logo 与目标 box 宽高比失配，不得拉伸")
+    image = ImageOps.contain(image, (width, height), Image.Resampling.LANCZOS)
+    return image, round(x + (width - image.width) / 2), round(y + (height - image.height) / 2), {
+        "source_ratio": source_ratio, "target_ratio": target_ratio, "ratio_mismatch": mismatch,
+    }
+
+
 def verify_photoshop(manifest_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    validate_logos(manifest["layers"])
     folder = manifest_path.parent / "verification"
     report = json.loads((folder / "photoshop-check.json").read_text(encoding="utf-8-sig"))
     if report.get("output") != manifest["output"] or report.get("textLayers") != 0 or report.get("layers") != len(manifest["layers"]) or report.get("names") != [layer["name"] for layer in reversed(manifest["layers"])]:
         raise ValueError("Photoshop 校验报告不是本次图层或存在文字层")
     if any(report.get(key) != manifest["canvas"][key] for key in ("width", "height", "resolution")):
         raise ValueError("Photoshop 校验报告画布或 DPI 不同")
+    if report.get("logoLayers") != sum(item.get("role") == "brand_logo" for item in manifest["layers"]) or report.get("logosVisible") is not True:
+        raise ValueError("Photoshop 校验报告缺少实际可见 Logo")
     size = (manifest["canvas"]["width"], manifest["canvas"]["height"])
     expected = Image.new("RGBA", size)
     foreground = Image.new("RGBA", size)
@@ -126,6 +167,15 @@ def main():
             pass
         else:
             raise AssertionError("out-of-canvas placement was accepted")
+        logo = {"name": "品牌Logo_验证", "role": "brand_logo", "box": {"x": 0, "y": 0, "width": 10, "height": 10}}
+        validate_logos([logo])
+        for invalid in ([], [dict(logo, visible=False)], [dict(logo, opacity=0)]):
+            try:
+                validate_logos(invalid)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("missing/hidden Logo accepted")
         print("ok")
         return
 
@@ -140,6 +190,8 @@ def main():
     job = json.loads(job_path.read_text(encoding="utf-8"))
     if job.get("texts"):
         raise ValueError("当前模式不允许 texts/Type Layer；请将全部文字放入 layers")
+    validate_logos(job["layers"])
+    job["layers"] = sorted(job["layers"], key=lambda item: item.get("role") == "brand_logo")
     canvas = job["canvas"]
     width, height = int(canvas["width"]), int(canvas["height"])
     resolution = int(canvas.get("resolution", 300))
@@ -160,49 +212,58 @@ def main():
         image = Image.open(item["path"])
         source_size = image.size
         source_has_alpha = bool(np.any(np.asarray(image.convert("RGBA"))[:, :, 3] < 255))
-        if abs((image.width / image.height) / (width / height) - 1) > float(job.get("max_aspect_error", 0.04)):
-            raise ValueError(f"生成画布比例不同，不得拉伸纠正: {item['name']}")
-        if item.get("require_source_alpha") and not source_has_alpha:
-            raise ValueError(f"白色细节或闭合线稿要求真实透明源图: {item['name']}")
-        image = image.resize((width, height), Image.Resampling.LANCZOS)
-        if item.get("transparent", True):
-            image = prepare_transparent_layer(image, threshold)
-            alpha = np.asarray(image)[:, :, 3]
-            if not np.any(alpha):
-                raise ValueError(f"隔离素材为空: {item['name']}")
-            transparent_ratio = float(np.mean(alpha == 0))
-            min_transparent_ratio = float(
-                item.get("min_transparent_ratio", default_min_transparent_ratio)
-            )
-            if transparent_ratio < min_transparent_ratio:
-                raise ValueError(f"透明区域不足，疑似混层: {item['name']}")
-            opaque_ratio = float(np.mean(alpha > 0))
-            max_opaque_ratio = item.get("max_opaque_ratio")
-            if max_opaque_ratio is not None and opaque_ratio > float(max_opaque_ratio):
-                raise ValueError(f"不透明内容过多，疑似混入相框或相邻元素: {item['name']}")
-            if item.get("target_bbox") is not None:
-                image = fit_generated_layer(image, item["target_bbox"])
+        x = y = 0
+        logo_geometry = {}
+        if item.get("role") == "brand_logo":
+            image, x, y, logo_geometry = prepare_logo(image, item, (width, height))
         else:
-            if source_has_alpha:
-                raise ValueError(f"背景源图必须完整不透明: {item['name']}")
-            if item.get("target_bbox") is not None:
-                raise ValueError("完整背景不得通过 target_bbox 缩放局部内容")
-            image = image.convert("RGB")
+            if abs((image.width / image.height) / (width / height) - 1) > float(job.get("max_aspect_error", 0.04)):
+                raise ValueError(f"生成画布比例不同，不得拉伸纠正: {item['name']}")
+            if item.get("require_source_alpha") and not source_has_alpha:
+                raise ValueError(f"白色细节或闭合线稿要求真实透明源图: {item['name']}")
+            image = image.resize((width, height), Image.Resampling.LANCZOS)
+            if item.get("transparent", True):
+                image = prepare_transparent_layer(image, threshold)
+                alpha = np.asarray(image)[:, :, 3]
+                if not np.any(alpha):
+                    raise ValueError(f"隔离素材为空: {item['name']}")
+                transparent_ratio = float(np.mean(alpha == 0))
+                min_transparent_ratio = float(
+                    item.get("min_transparent_ratio", default_min_transparent_ratio)
+                )
+                if transparent_ratio < min_transparent_ratio:
+                    raise ValueError(f"透明区域不足，疑似混层: {item['name']}")
+                opaque_ratio = float(np.mean(alpha > 0))
+                max_opaque_ratio = item.get("max_opaque_ratio")
+                if max_opaque_ratio is not None and opaque_ratio > float(max_opaque_ratio):
+                    raise ValueError(f"不透明内容过多，疑似混入相框或相邻元素: {item['name']}")
+                if item.get("target_bbox") is not None:
+                    image = fit_generated_layer(image, item["target_bbox"])
+            else:
+                if source_has_alpha:
+                    raise ValueError(f"背景源图必须完整不透明: {item['name']}")
+                if item.get("target_bbox") is not None:
+                    raise ValueError("完整背景不得通过 target_bbox 缩放局部内容")
+                image = image.convert("RGB")
         output = assets_dir / f"{index:02d}.png"
         image.save(output)
-        preview.alpha_composite(image.convert("RGBA"))
+        preview.alpha_composite(image.convert("RGBA"), (x, y))
         layer = {
                 "name": item["name"],
                 "path": str(output.resolve()),
-                "x": 0,
-                "y": 0,
-                "width": width,
-                "height": height,
+                "x": x,
+                "y": y,
+                "width": image.width,
+                "height": image.height,
                 "transparent": bool(item.get("transparent", True)),
                 "source_path": str(Path(item["path"]).resolve()),
                 "source_size": list(source_size),
                 "source_has_alpha": source_has_alpha,
             }
+        if item.get("role") == "brand_logo":
+            layer.update(logo_geometry)
+            layer["role"] = "brand_logo"
+            layer["box"] = item["box"]
         if "target_bbox" in item:
             layer["target_bbox"] = item["target_bbox"]
         if "semantic_text" in item:

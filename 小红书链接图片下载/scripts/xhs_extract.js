@@ -1,7 +1,3 @@
-/*
- * 在已打开的小红书图文笔记详情页中执行本文件。
- * 返回可直接保存为 JSON 的笔记正文、作者、详情页 URL 和网页正文图片链接。
- */
 (() => {
   if (!/\/(?:explore|discovery\/item)\/[a-zA-Z0-9]+/.test(location.pathname)) {
     throw new Error('需要单篇笔记详情链接；不能从搜索页下载缩略图');
@@ -66,4 +62,4 @@
     pageImageCount: Number(root.innerText?.match(/(?:^|\n)\s*\d+\s*\/\s*(\d+)\s*(?:\n|$)/)?.[1]) || null,
     images,
   };
-})();
+})

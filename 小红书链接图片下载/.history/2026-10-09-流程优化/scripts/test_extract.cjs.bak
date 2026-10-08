@@ -21,7 +21,7 @@ const root = {
 const run = pathname => vm.runInNewContext(source, {
   URL, location: {pathname, href: `https://www.xiaohongshu.com${pathname}?xsec_token=test`},
   document: {querySelector: () => root},
-})();
+});
 for (const path of ['/explore/abc123', '/discovery/item/abc123']) {
   const result = run(path);
   assert.equal(result.noteId, 'abc123');
@@ -32,17 +32,4 @@ for (const path of ['/explore/abc123', '/discovery/item/abc123']) {
   assert.ok(result.url.includes('xsec_token=test'));
 }
 assert.throws(() => run('/search_result_ai'), /单篇/);
-// 原文件为单一函数表达式；直接作回调与合法的字符串适配均返回数据。
-assert.equal(typeof vm.runInNewContext(source), 'function');
-const adapted = vm.runInNewContext(`(() => { return ${source.trim()}(); })`, {
-  URL, location: {pathname: '/explore/abc123', href: 'https://www.xiaohongshu.com/explore/abc123'},
-  document: {querySelector: () => root},
-})();
-assert.equal(adapted.images.length, 2);
-// 尚未加载的正文图片不能被 naturalWidth=0 过滤掉。
-const oldQuery = root.querySelectorAll;
-root.innerText = '1/1\n测试笔记';
-root.querySelectorAll = () => [{...img('https://sns-webpic-qc.xhscdn.com/lazy'), naturalWidth: 0, naturalHeight: 0}];
-assert.equal(run('/explore/abc123').images.length, 1);
-root.querySelectorAll = oldQuery;
 console.log('extract self-test passed');

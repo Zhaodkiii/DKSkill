@@ -35,6 +35,14 @@ for (const layer of m.layers) {
   if (layer.name.startsWith('文字图像_') && (!layer.semantic_text || layer.editable !== false)) throw new Error('text image layer requires semantic_text and editable:false');
   if (![layer.x, layer.y, layer.width, layer.height].every(Number.isFinite) || layer.width <= 0 || layer.height <= 0 || layer.x < 0 || layer.y < 0 || layer.x + layer.width > m.canvas.width || layer.y + layer.height > m.canvas.height) throw new Error('invalid layer placement');
 }
+const logos = m.layers.filter(layer => layer.role === 'brand_logo');
+if (!logos.length) throw new Error('每份成品必须有独立主题 Logo 层：role=brand_logo');
+if (logos.some(layer => !layer.name.startsWith('品牌Logo_') || layer.visible === false || Number(layer.opacity ?? 100) <= 0)) {
+  throw new Error('Logo 图层必须以 品牌Logo_ 命名且可见');
+}
+if (m.layers.slice(m.layers.indexOf(logos[0])).some(layer => layer.role !== 'brand_logo')) {
+  throw new Error('Logo 必须置于其他图层上方，请重新执行准备脚本');
+}
 if (!verifyOnly && fs.existsSync(m.output)) throw new Error('output exists; refuse overwrite, use --verify-only to inspect');
 if (verifyOnly && !fs.existsSync(m.output)) throw new Error('PSD does not exist for verification');
 
@@ -73,6 +81,7 @@ if (!verifyOnly) {
     jsx.push("var sourceLeft = src.activeLayer.bounds[0].as('px'); var sourceTop = src.activeLayer.bounds[1].as('px');");
     jsx.push('var placed = src.activeLayer.duplicate(doc, ElementPlacement.PLACEATBEGINNING); app.activeDocument = doc;');
     jsx.push(`placed.translate(UnitValue(${layer.x} + sourceLeft - placed.bounds[0].as('px'), 'px'), UnitValue(${layer.y} + sourceTop - placed.bounds[1].as('px'), 'px'));`);
+    if (layer.role === 'brand_logo') jsx.push('placed.visible = true; placed.opacity = 100;');
     jsx.push('} finally { src.close(SaveOptions.DONOTSAVECHANGES); app.activeDocument = doc; }');
   }
   jsx.push('initialEmptyLayer.remove();');
@@ -87,6 +96,10 @@ jsx.push("if (textCount != 0) throw new Error('unexpected Type Layer');");
 jsx.push(`if (check.resolution != ${m.canvas.resolution} || check.artLayers.length != ${m.layers.length}) throw new Error('resolution or layer count mismatch');`);
 jsx.push(`var expectedNames = [${m.layers.slice().reverse().map(layer => jsxString(layer.name)).join(',')}];`);
 jsx.push("for (var i=0; i<expectedNames.length; i++) if (check.artLayers[i].name != expectedNames[i]) throw new Error('layer name/order mismatch');");
+jsx.push('var actualLogoCount = 0;');
+for (const layer of logos) {
+  jsx.push(`var logo = check.artLayers.getByName(${jsxString(layer.name)}); if (!logo.visible || logo.opacity != 100) throw new Error('Logo is hidden or faded'); actualLogoCount++;`);
+}
 jsx.push(`check.saveAs(new File(${jsxString(previewPath)}), new PNGSaveOptions(), true, Extension.LOWERCASE);`);
 const backgroundIndices = m.layers.slice().reverse().flatMap((layer, i) => layer.transparent === false || layer.name.startsWith('背景') ? [i] : []);
 jsx.push(`var backgroundIndices = ${JSON.stringify(backgroundIndices)}, previousVisibility = [];`);
@@ -94,7 +107,7 @@ jsx.push('for (var i=0; i<backgroundIndices.length; i++) { var layer = check.art
 jsx.push(`try { check.saveAs(new File(${jsxString(foregroundPath)}), new PNGSaveOptions(), true, Extension.LOWERCASE); } finally { for (var i=0; i<backgroundIndices.length; i++) check.artLayers[backgroundIndices[i]].visible = previousVisibility[i]; }`);
 jsx.push(reportQuoteJSX);
 jsx.push('var names = []; for (var i=0; i<check.artLayers.length; i++) names.push(quote(check.artLayers[i].name));');
-jsx.push(`var report = '{"width":'+check.width.as('px')+',"height":'+check.height.as('px')+',"resolution":'+check.resolution+',"layers":'+check.artLayers.length+',"textLayers":'+textCount+',"names":['+names.join(',')+']}';`);
+jsx.push(`var report = '{"width":'+check.width.as('px')+',"height":'+check.height.as('px')+',"resolution":'+check.resolution+',"layers":'+check.artLayers.length+',"textLayers":'+textCount+',"logoLayers":'+actualLogoCount+',"logosVisible":true,"names":['+names.join(',')+']}';`);
 jsx.push(`var reportFile = new File(${jsxString(reportPath)}); reportFile.encoding = 'UTF8'; reportFile.open('w'); reportFile.write(report); reportFile.close();`);
 jsx.push('} finally { app.displayDialogs = previousDialogs; }');
 
